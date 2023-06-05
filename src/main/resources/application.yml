@@ -1,0 +1,40 @@
+spring:
+  redis:
+    host: localhost
+    port: 6379
+
+  application:
+    name: order-service
+  #  config:
+  #    import: optional:configserver:http://localhost:8080
+
+  datasource:
+    username: rozz
+    password: password
+    url: jdbc:postgresql://localhost:5332/marketdb
+
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: 'true'
+    hibernate:
+      ddl-auto: update
+    show-sql: 'true'
+
+#  elasticsearch:
+#    uris: https://localhost:8080
+#    password:
+
+exchange:
+  one: https://exchange.matraining.com/7d21b2cb-9942-4948-9699-1b9fa5a8ad1c
+  two: https://exchange2.matraining.com/7d21b2cb-9942-4948-9699-1b9fa5a8ad1c
+  key: 7d21b2cb-9942-4948-9699-1b9fa5a8ad1c
+
+
+server:
+  port: 8080
+
+
+
+

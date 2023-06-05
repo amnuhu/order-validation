@@ -1,0 +1,26 @@
+services:
+  db:
+    container_name: postgres-ordervalidation
+    image: postgres
+    environment:
+      POSTGRES_USER: rozz
+      POSTGRES_PASSWORD: password
+      PGDATA: /data/postgres
+    volumes:
+      - /var/lib/marketdb
+    ports:
+      - "5332:5432"
+    networks:
+      - db
+
+  redis:
+    container_name: redis
+    image: redis/redis-stack:latest
+    ports:
+      - "6379:6379"
+
+
+networks:
+  db:
+    driver: bridge
+
