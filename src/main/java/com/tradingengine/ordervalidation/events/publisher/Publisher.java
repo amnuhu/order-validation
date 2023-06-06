@@ -1,8 +1,5 @@
 package com.tradingengine.ordervalidation.events.publisher;
 
-
-import com.tradingengine.ordervalidation.dto.OrderRequestDto;
-import com.tradingengine.ordervalidation.dto.redis.ClientDetailsDto;
 import com.tradingengine.ordervalidation.dto.redis.RedisOrderDto;
 import com.tradingengine.ordervalidation.enums.OrderSide;
 import com.tradingengine.ordervalidation.enums.OrderType;
@@ -35,67 +32,64 @@ public class Publisher implements MessagePublisher {
 
 
 
-    @Override
-    public void publisher(RedisOrderDto order) {
+
+    private void publisher(RedisOrderInformation order) {
         redisTemplate.convertAndSend(topic.getTopic(), order);
         log.info("Messaged received by Publisher, Reading message {}",order);
 
     }
 
     @Override
-    public void publishValidationSuccess(RedisOrderDto orderDto) {
-
-    }
-
-    public RedisOrderInformation publishValidationSuccess(OrderRequestDto orderDto, ClientDetailsDto client) throws BuyPriceException, BuyLimitException,
+    public void publishValidationSuccess(RedisOrderDto order) throws BuyPriceException, BuyLimitException,
             InsufficientFundsException, IOException, NoWalletException, NoStockException, SellPriceException, SellLimitException, OrderNotValidException {
-        log.debug("Sending Redis Message {} for Client Id: {}", orderDto, client.getUserId());
-        OrderSide orderSide = orderDto.getSide();
+        log.debug("Sending Redis Message {} for Client Id: {}", order, order.getUserId());
+        System.out.println(order);
+        OrderSide orderSide = order.getSide();
         switch (orderSide) {
             case BUY -> {
-                OrderType orderType = orderDto.getType();
+                OrderType orderType = order.getType();
                 switch (orderType) {
                     case LIMIT -> {
-                        if (validationService.validateBuyOrderWithLimit(orderDto, client.getUserId())){
-                            return createOrderInformation(orderDto, client);
+                        if (validationService.validateBuyOrderWithLimit(order, order.getUserId())){
+                            publisher(createOrderInformation(order));
                         }
                     }
                     case MARKET -> {
-                        if (validationService.validateBuyOrderWithMarket(orderDto, client.getUserId())) {
-                            return createOrderInformation(orderDto, client);
+                        if (validationService.validateBuyOrderWithMarket(order, order.getUserId())) {
+                            publisher(createOrderInformation(order));
                         };
                     }
                 }
             }
             case SELL -> {
-                OrderType orderType = orderDto.getType();
+                OrderType orderType = order.getType();
                 switch (orderType) {
                     case LIMIT -> {
-                        if (validationService.validateSellLimitOrder(orderDto, client.getUserId())) {
-                            return createOrderInformation(orderDto, client);
+                        if (validationService.validateSellLimitOrder(order, order.getUserId())) {
+                            publisher(createOrderInformation(order));
                         };
                     }
                     case MARKET -> {
-                        if (validationService.validateSellMarketOrder(orderDto, client.getUserId())) {
-                            return createOrderInformation(orderDto, client);
+                        if (validationService.validateSellMarketOrder(order, order.getUserId())) {
+                            publisher(createOrderInformation(order));
                         };
                     }
                 }
             }
 
         }
-        throw new OrderNotValidException("Order not Valid");
     }
 
 
-    private RedisOrderInformation createOrderInformation(OrderRequestDto order, ClientDetailsDto client) {
+    private RedisOrderInformation createOrderInformation(RedisOrderDto order) {
         return RedisOrderInformation.builder()
                 .product(order.getProduct())
+                .price(order.getPrice())
                 .quantity(order.getQuantity())
                 .side(order.getSide())
                 .type(order.getType())
-                .portfolioId(client.getPortfolioId())
-                .userId(client.getUserId()).build();
+                .portfolioId(order.getPortfolioId())
+                .userId(order.getUserId()).build();
     }
 
 }

@@ -11,7 +11,7 @@ spring:
   datasource:
     username: rozz
     password: password
-    url: jdbc:postgresql://localhost:5332/marketdb
+    url: jdbc:postgresql://localhost:5632/marketdb
 
   jpa:
     properties:
@@ -33,7 +33,7 @@ exchange:
 
 
 server:
-  port: 8080
+  port: 7070
 
 
 

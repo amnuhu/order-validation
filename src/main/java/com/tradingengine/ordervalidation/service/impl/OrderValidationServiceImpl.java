@@ -1,39 +1,38 @@
 package com.tradingengine.ordervalidation.service.impl;
 
-import com.tradingengine.ordervalidation.dto.OrderRequestDto;
 import com.tradingengine.ordervalidation.dto.TradeInfoDto;
-import com.tradingengine.ordervalidation.entity.StockEntity;
-import com.tradingengine.ordervalidation.entity.WalletEntity;
+import com.tradingengine.ordervalidation.dto.StockDto;
+import com.tradingengine.ordervalidation.dto.WalletDto;
+import com.tradingengine.ordervalidation.dto.redis.RedisOrderDto;
 import com.tradingengine.ordervalidation.exceptions.validation.*;
-import com.tradingengine.ordervalidation.repository.StockRepository;
+import com.tradingengine.ordervalidation.integration.UserDataIntegration;
 import com.tradingengine.ordervalidation.service.MarketDataService;
 import com.tradingengine.ordervalidation.service.OrderValidationService;
-import com.tradingengine.ordervalidation.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 @Slf4j
+@Service
 @RequiredArgsConstructor
 public class OrderValidationServiceImpl implements OrderValidationService {
 
     private final MarketDataService marketDataService;
 
-    private final WalletService walletService;
+    private final UserDataIntegration userDataIntegration;
 
-    private final StockRepository stockRepository;
-
-    private boolean isQuotedPriceValid(OrderRequestDto order) throws IOException, BuyPriceException {
+    private boolean isQuotedPriceValid(RedisOrderDto order) throws IOException, BuyPriceException {
         log.info("Checking whether your bid price is valid! Not too low or high");
         Stream<TradeInfoDto> products = marketDataService.getProductByTicker(order.getProduct()) ;
         // make sure client's price is greater or equal to the minimum bid price ie bidPrice-maxPriceShift
         // make sure client's price is less than  or equal to the maximum bid price ie bidPrice + maxPriceShift
-        boolean isQuotedPriceValid = products.anyMatch(product -> order.getPrice() >=  product.bidPrice() - product.maxPriceShift()
-                && order.getPrice() <= product.bidPrice() + product.maxPriceShift());
+        boolean isQuotedPriceValid = products.anyMatch(product -> product.maxPriceShift() >=
+                Math.abs(product.lastTradedPrice() - order.getPrice()));
         if (isQuotedPriceValid) {
             log.info("Your BUY price is valid and may be matched on the Exchange");
             return true;
@@ -42,11 +41,12 @@ public class OrderValidationServiceImpl implements OrderValidationService {
         throw new BuyPriceException("Buy price is too high or too low check market Info");
     }
 
-    private boolean isWalletAmountSufficient(OrderRequestDto order, UUID userId) throws InsufficientFundsException {
+    private boolean isWalletAmountSufficient(RedisOrderDto order, UUID userId) throws InsufficientFundsException {
         log.info("Checking whether Wallet Balance is sufficient");
         // check if yor wallet balance can match your bidPrice walletAccount >= Order.Price
-        boolean isClientWalletSufficient = walletService.getWalletByUserId(userId)
-                .stream().anyMatch(wallet -> wallet.getAmount() >= order.getPrice());
+        ResponseEntity<WalletDto> walletEntity = userDataIntegration.getWallet(userId);
+        WalletDto wallet = walletEntity.getBody();
+        boolean isClientWalletSufficient = wallet.getAmount() >= order.getPrice();
         if (isClientWalletSufficient) {
             log.info("Wallet balance is sufficient");
             return true;
@@ -54,7 +54,7 @@ public class OrderValidationServiceImpl implements OrderValidationService {
         throw new InsufficientFundsException("Wallet Balance not Sufficient to make an Order");
     }
 
-    private Boolean isBuyQuantityValid(OrderRequestDto order) throws IOException, BuyLimitException {
+    private Boolean isBuyQuantityValid(RedisOrderDto order) throws IOException, BuyLimitException {
         log.info("Validating Buy Limit Order against the current Market Data BuyLimit!");
         Stream<TradeInfoDto> products =  marketDataService.getProductByTicker(order.getProduct());
         log.info("Current Market Buy Limit");
@@ -65,21 +65,21 @@ public class OrderValidationServiceImpl implements OrderValidationService {
             return true;
         };
         log.info("Yor Buy quantity can't be matched");
-        throw new BuyLimitException("Quantity not Available on Exchange");
+        throw new BuyLimitException("Quantity not Available on Exchange Please Check MarketData for Limit");
     }
 
     private double getWalletBalance(UUID userId) throws NoWalletException {
         log.info("Obtaining amount in wallet");
-        Optional<WalletEntity> wallet = walletService.getWalletByUserId(userId);
-        if (wallet.isPresent()) {
-            return wallet.get().getAmount();
+        ResponseEntity<WalletDto> walletEntity = userDataIntegration.getWallet(userId);
+        if (walletEntity.getBody() != null) {
+            return walletEntity.getBody().getAmount();
         }
         log.info("No wallet found for User");
         throw new NoWalletException("No wallet found");
     }
 
     // No price validation
-    public boolean isWalletBalanceSufficientForMarketOrder(OrderRequestDto order, UUID userId) throws IOException,
+    public boolean isWalletBalanceSufficientForMarketOrder(RedisOrderDto order, UUID userId) throws IOException,
             NoWalletException, BuyPriceException {
     double walletBalance = getWalletBalance(userId);
     // since it's a MARKET ORDER you are going all in based on your account balance
@@ -87,7 +87,8 @@ public class OrderValidationServiceImpl implements OrderValidationService {
     log.info("Market data based on Product Ticker");
     marketDataService.getProductByTicker(order.getProduct()).forEach(System.out::println);
     Stream<TradeInfoDto> products =  marketDataService.getProductByTicker(order.getProduct());
-    boolean isQuotedPriceValid = products.anyMatch(product -> order.getPrice() >= product.bidPrice() - product.maxPriceShift());
+    boolean isQuotedPriceValid = products.anyMatch(product -> product.maxPriceShift() >=
+            Math.abs(product.lastTradedPrice() - order.getPrice()));
     if (isQuotedPriceValid) {
         log.info("Your MARKET order has chance of being fulfilled, Account Balance is sufficient for {} Stock", order.getProduct());
         return true;
@@ -97,7 +98,7 @@ public class OrderValidationServiceImpl implements OrderValidationService {
     }
 
     @Override
-    public boolean validateBuyOrderWithMarket(OrderRequestDto order, UUID userId) throws IOException, BuyLimitException, BuyPriceException, NoWalletException {
+    public boolean validateBuyOrderWithMarket(RedisOrderDto order, UUID userId) throws IOException, BuyLimitException, BuyPriceException, NoWalletException {
         // Check the quantity is available and check the wallet has sufficient amount
         log.info("Validating a BUY order with MARKET");
         Stream<TradeInfoDto> products =  marketDataService.getProductByTicker(order.getProduct());
@@ -107,7 +108,7 @@ public class OrderValidationServiceImpl implements OrderValidationService {
     }
 
     @Override
-    public boolean validateBuyOrderWithLimit(OrderRequestDto order, UUID userId) throws IOException, BuyPriceException, InsufficientFundsException, BuyLimitException {
+    public boolean validateBuyOrderWithLimit(RedisOrderDto order, UUID userId) throws IOException, BuyPriceException, InsufficientFundsException, BuyLimitException {
         log.info("Validating a BUY order with LIMIT");
         Stream<TradeInfoDto> products =  marketDataService.getProductByTicker(order.getProduct());
         log.info("Current Market data for {}", order.getProduct());
@@ -116,33 +117,26 @@ public class OrderValidationServiceImpl implements OrderValidationService {
     }
 
 
-    private boolean canUserSellStock(UUID portfolioId, OrderRequestDto order) throws NoStockException, SellLimitException {
+    private boolean canUserSellStock(UUID portfolioId, RedisOrderDto order) throws NoStockException, SellLimitException {
         log.info("Validating Sell LIMIT Order By checking if client Owns That Stock");
-        StockEntity stock = getUserStockByTickerAndPortfolio(portfolioId, order.getProduct());
-        if  (canUserSellStockQuantity(stock, order.getQuantity())) {
-            return true;
+        StockDto stock = userDataIntegration.getUserStockByTickerAndPortfolio(portfolioId, order.getProduct()).getBody();
+        if (stock != null) {
+            if  (canUserSellStockQuantity(stock, order.getQuantity())) {
+                return true;
+            }
+            log.info("You don't have such quantity to sell, reduce the quantity");
+            throw new SellLimitException("You stock doesn't have such quantity to sell");
         }
-        log.info("You don't have such quantity to sell, reduce the quantity");
-        throw new SellLimitException("You stock doesn't have such quantity to sell");
 
+        return false;
     }
 
-    private StockEntity getUserStockByTickerAndPortfolio(UUID portfolioId, String ticker) throws NoStockException {
-        log.info("Obtaining stock from client portfolio");
-        Optional<StockEntity> stock = stockRepository.findStockEntityByPortfolio_ClientIdAndTicker(portfolioId, ticker);
-        if (stock.isPresent()) {
-            return stock.get();
-        }
-        log.info("You don't have such stock");
-        throw new NoStockException("You don't have such stock");
 
-    }
-
-    private boolean canUserSellStockQuantity(StockEntity stock, int orderedQuantity) {
+    private boolean canUserSellStockQuantity(StockDto stock, int orderedQuantity) {
         return stock.getQuantity() >= orderedQuantity;
     }
 
-    private boolean isSellPriceLimitOrderValid(OrderRequestDto order) throws IOException, SellPriceException {
+    private boolean isSellPriceLimitOrderValid(RedisOrderDto order) throws IOException, SellPriceException {
         Stream<TradeInfoDto> products =  marketDataService.getProductByTicker(order.getProduct());
         boolean isSellPriceValid = products.anyMatch(product ->  order.getPrice() >= product.askPrice() - product.maxPriceShift()
                 && order.getPrice() <= product.askPrice() + product.maxPriceShift());
@@ -156,7 +150,7 @@ public class OrderValidationServiceImpl implements OrderValidationService {
 
 
 
-    private Boolean validateSellLimit(OrderRequestDto order) throws IOException, SellLimitException {
+    private Boolean validateSellLimit(RedisOrderDto order) throws IOException, SellLimitException {
         log.info("Validating Sell Limit Order against the current Market Data Sell Limit!");
         Stream<TradeInfoDto> products =  marketDataService.getProductByTicker(order.getProduct());
         log.info("Current Market Sell limit");
@@ -170,7 +164,7 @@ public class OrderValidationServiceImpl implements OrderValidationService {
     }
 
     @Override
-    public  boolean validateSellMarketOrder(OrderRequestDto order, UUID userId) throws IOException, SellLimitException, NoStockException {
+    public  boolean validateSellMarketOrder(RedisOrderDto order, UUID userId) throws IOException, SellLimitException, NoStockException {
         // Selling at Market Order means you will take any price that comes
         if (canUserSellStock(userId, order)) {
             log.info("Current Market data: ");
@@ -183,7 +177,7 @@ public class OrderValidationServiceImpl implements OrderValidationService {
     }
 
     @Override
-    public boolean validateSellLimitOrder(OrderRequestDto order, UUID userId) throws IOException, NoStockException, SellLimitException, SellPriceException {
+    public boolean validateSellLimitOrder(RedisOrderDto order, UUID userId) throws IOException, NoStockException, SellLimitException, SellPriceException {
         // Selling: check whether client owns the stock
         if (canUserSellStock(userId, order)) {
             log.info("Current Market data: ");

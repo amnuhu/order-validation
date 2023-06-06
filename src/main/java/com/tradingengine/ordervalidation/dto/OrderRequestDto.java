@@ -8,19 +8,22 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.UUID;
+
 @Setter
 @Getter
 public class OrderRequestDto{
-    @NotNull
+
     private String product;
-    @NotNull
-    @Min(value = 1)
+
     private Integer quantity;
 
     private Double price;
-    @NotNull
+
     private OrderSide side;
-    @NotNull
+
     private OrderType type;
+
+    private UUID portfolioId;
 }
 

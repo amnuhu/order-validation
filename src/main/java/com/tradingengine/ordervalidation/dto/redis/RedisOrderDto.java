@@ -19,5 +19,7 @@ public class RedisOrderDto {
     private Double price;
     private OrderSide side;
     private OrderType type;
+    private UUID portfolioId;
+    private UUID userId;
 
 }
