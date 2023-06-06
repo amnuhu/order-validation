@@ -1,8 +1,7 @@
 package com.tradingengine.ordervalidation.config;
 
-import com.tradingengine.ordervalidation.dto.redis.RedisOrderDto;
+import com.tradingengine.ordervalidation.events.model.RedisOrderInformation;
 import com.tradingengine.ordervalidation.events.publisher.Publisher;
-import com.tradingengine.ordervalidation.events.subcriber.Receiver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.MessageListener;
@@ -20,6 +19,7 @@ import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 @EnableRedisRepositories
 public class RedisConfiguration {
 
+    @Bean
     public JedisConnectionFactory redisConnectionFactory() {
         return new JedisConnectionFactory();
     }
@@ -29,25 +29,21 @@ public class RedisConfiguration {
     {
         RedisTemplate<String,Object> redisTemplate = new RedisTemplate<>();
         redisTemplate.setConnectionFactory(redisConnectionFactory);
-        redisTemplate.setValueSerializer(new Jackson2JsonRedisSerializer<RedisOrderDto>(RedisOrderDto.class));
+        redisTemplate.setValueSerializer(new Jackson2JsonRedisSerializer<RedisOrderInformation>(RedisOrderInformation.class));
         return redisTemplate;
     }
 
 
     @Bean
     public ChannelTopic topic() {
-        return new ChannelTopic("order-validation-pubsub");
+        return new ChannelTopic("order");
     }
 
     @Bean
-    public MessageListener messageListenerAdapter(Receiver receiver) {
-        return new MessageListenerAdapter(receiver, "receiveMessage");
+    public MessageListener messageListenerAdapter() {
+        return new MessageListenerAdapter();
     }
 
-    @Bean
-    Receiver receiver() {
-        return new Receiver();
-    }
 
     @Bean
     public Publisher messagePublisher()
